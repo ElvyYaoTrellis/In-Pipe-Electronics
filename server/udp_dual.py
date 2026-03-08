@@ -234,7 +234,7 @@ class StreamManager:
                 encoder=self.args.encoder,
                 low_light=False,
                 v4l2_extra_controls=self.args.v4l2_extra10,
-                src_fps=30,
+                src_fps=20,
             )
 
             ok = self._start_pipeline(p)
@@ -306,7 +306,7 @@ def main():
     # Cam10 (USB) -> now 1080p MJPEG
     ap.add_argument("--w10", type=int, default=1920)
     ap.add_argument("--h10", type=int, default=1080)
-    ap.add_argument("--fps10", type=int, default=30)
+    ap.add_argument("--fps10", type=int, default=10)
 
     # USB camera mode
     ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="mjpg")

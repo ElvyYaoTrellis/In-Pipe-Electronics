@@ -17,6 +17,12 @@ SYMBOL_1 = 0b110
 # This is sent before AND after each frame so the strip always latches cleanly.
 _RESET_BYTES = bytes(91)
 
+# Open once at startup
+_spi = spidev.SpiDev()
+_spi.open(BUS, DEV)
+_spi.max_speed_hz = HZ
+_spi.mode = 0
+
 
 def _encode_grb(grb: bytes) -> bytearray:
     """Convert raw GRB bytes to the SPI bitstream WS2812 needs."""
@@ -46,27 +52,19 @@ def _frame_all(r: int, g: int, b: int, brightness: float = 1.0) -> bytes:
 
 
 def _write_ws2812(grb_frame: bytes, clear_twice: bool = False) -> None:
-    spi = spidev.SpiDev()
-    spi.open(BUS, DEV)
-    spi.max_speed_hz = HZ
-    spi.mode    = 0
-    spi.no_cs   = True   # WS2812 has no chip-select; suppress CS toggling
-
     payload = _encode_grb(grb_frame)
+    combined = _RESET_BYTES + payload + _RESET_BYTES
+    _spi.writebytes2(combined)
+    if clear_twice:
+        _spi.writebytes2(_RESET_BYTES + payload + _RESET_BYTES)
+    # No close() — MOSI stays driven low by the controller
 
-    # Pre-reset: flush any mid-frame state left from a previous write
-    spi.writebytes2(_RESET_BYTES)
 
-    spi.writebytes2(payload)
+async def _write_async(grb_frame: bytes, clear_twice: bool = False) -> None:
+    """Run the blocking SPI write in a thread so the event loop stays free."""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _write_ws2812, grb_frame, clear_twice)
 
-    # Post-reset: latch the frame (WS2812 needs >50 µs low; _RESET_BYTES ≈ 300 µs)
-    spi.writebytes2(_RESET_BYTES)
-
-    if clear_twice:                     # extra pass for stubborn "1 LED stays on" issue
-        spi.writebytes2(payload)
-        spi.writebytes2(_RESET_BYTES)
-
-    spi.close()
 
 
 async def _write_async(grb_frame: bytes, clear_twice: bool = False) -> None:
