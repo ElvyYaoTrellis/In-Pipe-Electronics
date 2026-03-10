@@ -28,6 +28,7 @@ NOTE:
   This version moves pressure-down to button index 2 (commonly "B").
 """
 
+import os
 import threading
 import time
 import queue
@@ -263,16 +264,19 @@ def _open_rtsp():
     Try FFMPEG backend first (same stack ffplay uses), then fall back
     to a GStreamer pipeline if FFMPEG is not available.
     """
-    # Option 1: FFMPEG backend — works wherever ffplay works
+    # Option 1: FFMPEG backend with low-latency flags
+    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+        "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0"
+    )
     cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
     if cap.isOpened():
         print("[video] opened via FFMPEG backend")
         return cap
 
-    # Option 2: GStreamer pipeline fallback
+    # Option 2: GStreamer pipeline fallback (latency=0, no jitter buffer delay)
     print("[video] FFMPEG backend failed, trying GStreamer pipeline...")
     gst = (
-        f"rtspsrc location={RTSP_URL} latency=100 protocols=tcp ! "
+        f"rtspsrc location={RTSP_URL} latency=0 protocols=tcp ! "
         "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
         "appsink drop=true sync=false max-buffers=1"
     )
