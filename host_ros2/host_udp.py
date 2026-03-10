@@ -583,13 +583,13 @@
 
 
 #!/usr/bin/env python3
-"""host_no_tmotor.py  (VELOCITY-ONLY + UDP VIDEO + RESPONSIVE MOTOR HTTP)
+"""host_udp.py  (VELOCITY-ONLY + RTSP VIDEO + RESPONSIVE MOTOR HTTP)
 
 ROS 2 Humble base-station host.
 
 What it does:
 - Subscribes to /joy (sensor_msgs/msg/Joy)
-- Receives *UDP RTP/H264* video (OpenCV + GStreamer)
+- Receives *RTSP* video (OpenCV + GStreamer, rtsp://<RADXA_IP>:8554/stream)
 - Sends *velocity* commands to the Radxa 2Dac2Motor HTTP server WITHOUT queueing
   (single sender thread, latest-only)
 
@@ -629,11 +629,8 @@ PRESSURE_BAUD = 115200
 
 RADXA_IP  = "192.168.8.232"
 
-# -------- UDP VIDEO (RTP/H264) --------
-# Radxa sender should do: ... ! rtph264pay pt=96 ... ! udpsink host=<BASE_IP> port=5000 sync=false
-UDP_PORT = 5000
-UDP_BIND = "0.0.0.0"  # informational (we don't set udpsrc address; it binds locally)
-RTP_CAPS = "application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000"
+# -------- RTSP VIDEO --------
+RTSP_URL = f"rtsp://{RADXA_IP}:8554/stream"
 
 MOTOR_HTTP_PT = 8005
 LED_HTTP_PT   = 8080
@@ -831,16 +828,11 @@ def motor_sender_loop():
 
         _motor_event.clear()
 
-# ------------------ Video helpers (UDP RTP/H264) ------------------
-def _open_udp():
-    """
-    Requires OpenCV built with GStreamer support.
-    Use capsfilter form (more reliable with OpenCV).
-    """
+# ------------------ Video helpers (RTSP) ------------------
+def _open_rtsp():
+    """Requires OpenCV built with GStreamer support."""
     gst = (
-        f"udpsrc port={UDP_PORT} reuse=true ! "
-        f"{RTP_CAPS} ! "
-        "rtpjitterbuffer latency=0 ! "
+        f"rtspsrc location={RTSP_URL} latency=0 ! "
         "rtph264depay ! avdec_h264 ! videoconvert ! "
         "appsink drop=true sync=false max-buffers=1"
     )
@@ -1066,13 +1058,13 @@ def health_poll_loop():
         time.sleep(0.5)
 
 def video_loop():
-    print(f"[video] Opening UDP stream on {UDP_BIND}:{UDP_PORT} (listening on port {UDP_PORT})")
-    cap = _open_udp()
+    print(f"[video] Opening RTSP stream {RTSP_URL}")
+    cap = _open_rtsp()
     if cap is None or not cap.isOpened():
-        print(f"[video] cannot open UDP stream on {UDP_BIND}:{UDP_PORT}")
+        print(f"[video] cannot open RTSP stream {RTSP_URL}")
         return
 
-    win = "UDP + Joystick Base Station (ROS2)"
+    win = "RTSP + Joystick Base Station (ROS2)"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)   # allow resizing
     cv2.resizeWindow(win, 1280, 720)          # pick what you want (e.g., 800x600, 1920x1080)
 
@@ -1090,7 +1082,7 @@ def video_loop():
             print("[video] read failed, reconnecting...")
             cap.release()
             time.sleep(RECONNECT_DELAY_S)
-            cap = _open_udp()
+            cap = _open_rtsp()
             if cap is None or not cap.isOpened():
                 print("[video] reconnect failed, retrying...")
                 continue
@@ -1127,8 +1119,9 @@ def video_loop():
         else:
             _put_text(frame, f"Radxa /health: ERR {h_sum}", (10, 144))
 
-        _put_text(frame, "LB: LED ON  RB: LED OFF  A: BRAKE  X: CAM SW  (Q to quit video)", (10, 168))
-        _put_text(frame, f"JOY: {'OK' if joy_ok else 'WAITING'}", (10, 192))
+        _put_text(frame, f"Stream: {RTSP_URL}", (10, 168))
+        _put_text(frame, "LB: LED ON  RB: LED OFF  A: BRAKE  X: CAM SW  (Q to quit video)", (10, 192))
+        _put_text(frame, f"JOY: {'OK' if joy_ok else 'WAITING'}", (10, 216))
 
         cv2.imshow(win, frame)
         if (cv2.waitKey(1) & 0xFF) == ord('q'):
