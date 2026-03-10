@@ -42,7 +42,7 @@ def build_pipeline(device: str, width: int, height: int, fps: int,
     src_fps_caps = f",framerate={src_fps}/1" if src_fps else ""
 
     common_tail = (
-        f"queue max-size-buffers=4 leaky=downstream ! "
+        f"queue max-size-buffers=2 leaky=downstream ! "
         f"videorate drop-only=true ! video/x-raw,framerate={fps}/1 ! "
         f"queue max-size-buffers=1 leaky=downstream ! "
         f"videoconvert ! "
@@ -51,7 +51,7 @@ def build_pipeline(device: str, width: int, height: int, fps: int,
         f"queue max-size-buffers=1 leaky=downstream ! "
         f"videoscale ! video/x-raw,format=NV12,width={width},height={height},framerate={fps}/1 ! "
         f"queue max-size-buffers=1 leaky=downstream ! "
-        f"{encoder} bps=10000000 gop=30 ! h264parse config-interval=-1 ! "
+        f"{encoder} bps=10000000 gop=5 ! h264parse config-interval=-1 ! "
         f"rtph264pay name=pay0 pt=96 config-interval=1"
     )
 
