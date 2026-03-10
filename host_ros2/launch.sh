@@ -20,7 +20,6 @@ set -u
 echo "[INFO] Killing existing processes (best-effort)..."
 pkill -f "ros2 run joy joy_node" 2>/dev/null || true
 pkill -f "host_esp_base.py" 2>/dev/null || true
-pkill -f "python3 .*host_udp.py" 2>/dev/null || true
 pkill -f "python3 .*IMU_host.py" 2>/dev/null || true   # <-- added
 sleep 1
 
