@@ -832,8 +832,8 @@ def motor_sender_loop():
 def _open_rtsp():
     """Requires OpenCV built with GStreamer support."""
     gst = (
-        f"rtspsrc location={RTSP_URL} latency=0 ! "
-        "rtph264depay ! avdec_h264 ! videoconvert ! "
+        f"rtspsrc location={RTSP_URL} latency=100 protocols=tcp ! "
+        "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
         "appsink drop=true sync=false max-buffers=1"
     )
     cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
