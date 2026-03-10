@@ -830,7 +830,18 @@ def motor_sender_loop():
 
 # ------------------ Video helpers (RTSP) ------------------
 def _open_rtsp():
-    """Requires OpenCV built with GStreamer support."""
+    """
+    Try FFMPEG backend first (same stack ffplay uses), then fall back
+    to a GStreamer pipeline if FFMPEG is not available.
+    """
+    # Option 1: FFMPEG (default backend) — works wherever ffplay works
+    cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
+    if cap.isOpened():
+        print("[video] opened via FFMPEG backend")
+        return cap
+
+    # Option 2: GStreamer pipeline fallback
+    print("[video] FFMPEG backend failed, trying GStreamer pipeline...")
     gst = (
         f"rtspsrc location={RTSP_URL} latency=100 protocols=tcp ! "
         "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
@@ -838,7 +849,9 @@ def _open_rtsp():
     )
     cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
     if cap.isOpened():
+        print("[video] opened via GStreamer backend")
         return cap
+
     return None
 
 def _put_text(img, text, org, scale=0.6, color=(255, 255, 255), thickness=1):
