@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""host_no_tmotor.py  (VELOCITY-ONLY + UDP VIDEO + RESPONSIVE MOTOR HTTP + UART OUT)
+"""host_esp_base.py  (VELOCITY-ONLY + RTSP VIDEO + RESPONSIVE MOTOR HTTP + UART OUT)
 
 ROS 2 Humble base-station host.
 
 What it does:
 - Subscribes to /joy (sensor_msgs/msg/Joy)
-- Receives *UDP RTP/H264* video (OpenCV + GStreamer)
+- Receives *RTSP* video (OpenCV, rtsp://<RADXA_IP>:8554/stream)
 - Sends *velocity* commands to the Radxa 2Dac2Motor HTTP server WITHOUT queueing
   (single sender thread, latest-only)
 
@@ -49,11 +49,8 @@ PRESSURE_BAUD = 115200
 
 RADXA_IP = "192.168.8.232"
 
-# -------- UDP VIDEO (RTP/H264) --------
-# Radxa sender should do: ... ! rtph264pay pt=96 ... ! udpsink host=<BASE_IP> port=5000 sync=false
-UDP_PORT = 5000
-UDP_BIND = "0.0.0.0"  # informational (we don't set udpsrc address; it binds locally)
-RTP_CAPS = "application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000"
+# -------- RTSP VIDEO --------
+RTSP_URL = f"rtsp://{RADXA_IP}:8554/stream"
 
 MOTOR_HTTP_PT = 8005
 LED_HTTP_PT = 8080
@@ -260,22 +257,30 @@ def motor_sender_loop():
 
         _motor_event.clear()
 
-# ------------------ Video helpers (UDP RTP/H264) ------------------
-def _open_udp():
+# ------------------ Video helpers (RTSP) ------------------
+def _open_rtsp():
     """
-    Requires OpenCV built with GStreamer support.
-    Use capsfilter form (more reliable with OpenCV).
+    Try FFMPEG backend first (same stack ffplay uses), then fall back
+    to a GStreamer pipeline if FFMPEG is not available.
     """
+    # Option 1: FFMPEG backend — works wherever ffplay works
+    cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
+    if cap.isOpened():
+        print("[video] opened via FFMPEG backend")
+        return cap
+
+    # Option 2: GStreamer pipeline fallback
+    print("[video] FFMPEG backend failed, trying GStreamer pipeline...")
     gst = (
-    f"udpsrc port={UDP_PORT} reuse=true ! "
-    f"{RTP_CAPS} ! "
-    "rtpjitterbuffer latency=50 drop-on-late=true ! "
-    "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
-    "appsink drop=true sync=false max-buffers=1"
+        f"rtspsrc location={RTSP_URL} latency=100 protocols=tcp ! "
+        "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
+        "appsink drop=true sync=false max-buffers=1"
     )
     cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
     if cap.isOpened():
+        print("[video] opened via GStreamer backend")
         return cap
+
     return None
 
 def _put_text(img, text, org, scale=0.6, color=(255, 255, 255), thickness=1):
@@ -531,13 +536,13 @@ def health_poll_loop():
         time.sleep(0.5)
 
 def video_loop():
-    print(f"[video] Opening UDP stream on {UDP_BIND}:{UDP_PORT} (listening on port {UDP_PORT})")
-    cap = _open_udp()
+    print(f"[video] Opening RTSP stream {RTSP_URL}")
+    cap = _open_rtsp()
     if cap is None or not cap.isOpened():
-        print(f"[video] cannot open UDP stream on {UDP_BIND}:{UDP_PORT}")
+        print(f"[video] cannot open RTSP stream {RTSP_URL}")
         return
 
-    win = "UDP + Joystick Base Station (ROS2)"
+    win = "RTSP + Joystick Base Station (ROS2)"
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(win, 1280, 720)
 
@@ -556,7 +561,7 @@ def video_loop():
             print("[video] read failed, reconnecting...")
             cap.release()
             time.sleep(RECONNECT_DELAY_S)
-            cap = _open_udp()
+            cap = _open_rtsp()
             if cap is None or not cap.isOpened():
                 print("[video] reconnect failed, retrying...")
                 continue
