@@ -1,42 +1,32 @@
 #!/bin/bash
 
-# ROS 2 Humble launcher for the base station
-# - Starts joy_node
-# - Starts host_modified_ros2.py
-#
-# Notes:
-# - No roscore in ROS2.
-# - If gnome-terminal is available, it opens separate terminals.
-#   Otherwise it runs the processes in the background in this shell.
+# ROS 2 Humble launcher (Joystick + RTSP streaming + IMU viz)
+# - Starts joy_node (ROS2)
+# - Starts host_udp.py
+# - Starts IMU_host.py
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-HOST_SCRIPT="$SCRIPT_DIR/host_modified_ros2.py"
+HOST_SCRIPT="$SCRIPT_DIR/host_esp_base.py"
+IMU_SCRIPT="$SCRIPT_DIR/IMU_host.py"   # <-- adjust if your file is elsewhere
 
-# --- Source ROS 2 Humble safely even under `set -u` ---
-# Some ROS 2 setup scripts reference AMENT_TRACE_SETUP_FILES; if it's unset and
-# nounset is enabled, sourcing can fail. Predefine it and temporarily disable nounset.
+# Source ROS 2 Humble safely even under `set -u`
 export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
 set +u
 source /opt/ros/humble/setup.bash
 set -u
 
-# Optional: source a colcon workspace if present
-if [ -f "$SCRIPT_DIR/../install/setup.bash" ]; then
-  source "$SCRIPT_DIR/../install/setup.bash"
-elif [ -f "$SCRIPT_DIR/install/setup.bash" ]; then
-  source "$SCRIPT_DIR/install/setup.bash"
-fi
-
 echo "[INFO] Killing existing processes (best-effort)..."
 pkill -f "ros2 run joy joy_node" 2>/dev/null || true
-pkill -f "host_modified_ros2.py" 2>/dev/null || true
-pkill -f "python3 .*host_modified_ros2.py" 2>/dev/null || true
+pkill -f "host_esp_base.py" 2>/dev/null || true
+pkill -f "python3 .*host_udp.py" 2>/dev/null || true
+pkill -f "python3 .*IMU_host.py" 2>/dev/null || true   # <-- added
 sleep 1
 
 JOY_CMD="source /opt/ros/humble/setup.bash; ros2 run joy joy_node"
 HOST_CMD="source /opt/ros/humble/setup.bash; cd \"$SCRIPT_DIR\"; python3 \"$HOST_SCRIPT\""
+IMU_CMD="source /opt/ros/humble/setup.bash; cd \"$SCRIPT_DIR\"; python3 \"$IMU_SCRIPT\""  # <-- added
 
 run_in_terminal_or_bg() {
   local title="$1"; shift
@@ -55,16 +45,16 @@ run_in_terminal_or_bg() {
 echo "[INFO] Starting joy_node..."
 JOY_PID=$(run_in_terminal_or_bg "joy_node" "$JOY_CMD") || true
 
-echo "[INFO] Starting host_modified_ros2.py..."
-HOST_PID=$(run_in_terminal_or_bg "host_modified_ros2" "$HOST_CMD") || true
+echo "[INFO] Starting joystick+stream app..."
+HOST_PID=$(run_in_terminal_or_bg "joy_stream" "$HOST_CMD") || true
 
-# If we launched background jobs (no gnome-terminal), keep this shell alive
-# so Ctrl+C can stop them.
+# echo "[INFO] Starting IMU host visualizer..."
+# IMU_PID=$(run_in_terminal_or_bg "imu_host" "$IMU_CMD") || true
+
 if ! command -v gnome-terminal >/dev/null 2>&1; then
-  echo "[INFO] Background PIDs: joy=${JOY_PID:-n/a} host=${HOST_PID:-n/a}"
+  echo "[INFO] Background PIDs: joy=${JOY_PID:-n/a} host=${HOST_PID:-n/a} imu=${IMU_PID:-n/a}"
   echo "[INFO] Press Ctrl+C here to stop."
 
-  trap 'echo "[INFO] Stopping..."; kill ${JOY_PID:-} 2>/dev/null || true; kill ${HOST_PID:-} 2>/dev/null || true; exit 0' INT TERM
+  trap 'echo "[INFO] Stopping..."; kill ${JOY_PID:-} 2>/dev/null || true; kill ${HOST_PID:-} 2>/dev/null || true; kill ${IMU_PID:-} 2>/dev/null || true; exit 0' INT TERM
   while true; do sleep 1; done
 fi
-
