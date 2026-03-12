@@ -266,7 +266,7 @@ def _open_rtsp():
     """
     # Option 1: FFMPEG backend with low-latency flags
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-        "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0"
+        "rtsp_transport;tcp|fflags;nobuffer|flags;low_delay|max_delay;0|probesize;32|analyzeduration;0"
     )
     cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
     if cap.isOpened():
