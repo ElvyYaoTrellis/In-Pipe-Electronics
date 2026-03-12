@@ -35,6 +35,7 @@ import queue
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
+import numpy as np
 import requests
 import serial
 
@@ -539,6 +540,24 @@ def health_poll_loop():
 
         time.sleep(0.5)
 
+def _make_status_frame(fps, p, v1s, v2s, led_on, joy_ok, joy_age, cam, h_ok, h_sum):
+    """Build a 480x260 status panel with white text on black background."""
+    panel = np.zeros((260, 480, 3), dtype=np.uint8)
+    rows = [
+        f"FPS: {fps:4.1f}",
+        f"Pressure: {p:.2f} bar",
+        f"Vel req:  m1 {v1s:+.2f}   m2 {v2s:+.2f}",
+        f"LED: {'ON' if led_on else 'OFF'}     Joy age: {joy_age:.2f}s",
+        f"Cam: /dev/video{cam}  (X toggles)",
+        f"Radxa: {'(no data)' if h_ok is None else ('OK  ' + h_sum if h_ok else 'ERR ' + h_sum)}",
+        "LB:LED ON  RB:LED OFF  A:BRAKE  X:CAM",
+        f"Joystick: {'OK' if joy_ok else 'WAITING'}",
+    ]
+    for i, text in enumerate(rows):
+        _put_text(panel, text, (10, 28 + i * 30), scale=0.55)
+    return panel
+
+
 def video_loop():
     print(f"[video] Opening RTSP stream {RTSP_URL}")
     cap = _open_rtsp()
@@ -546,9 +565,12 @@ def video_loop():
         print(f"[video] cannot open RTSP stream {RTSP_URL}")
         return
 
-    win = "RTSP + Joystick Base Station (ROS2)"
-    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(win, 1280, 720)
+    win_vid    = "Camera"
+    win_status = "Status"
+    cv2.namedWindow(win_vid, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(win_vid, 1280, 720)
+    cv2.namedWindow(win_status, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(win_status, 480, 260)
 
     last_ts = time.time()
     frames = 0
@@ -561,7 +583,7 @@ def video_loop():
         if ok and frame is not None:
             frame = cv2.convertScaleAbs(frame, alpha=alpha, beta=beta)
 
-        if not ok or frame is None:     
+        if not ok or frame is None:
             print("[video] read failed, reconnecting...")
             cap.release()
             time.sleep(RECONNECT_DELAY_S)
@@ -580,32 +602,19 @@ def video_loop():
             frames = 0
 
         with lock:
-            p = state["pressure"]
-            joy_ok = state["joy_alive"]
-            led_on = state["led_on"]
+            p       = state["pressure"]
+            joy_ok  = state["joy_alive"]
+            led_on  = state["led_on"]
             v1s, v2s = state["last_vel_sent"]
-            h_ok = state["health_ok"]
-            h_sum = state["health_summary"]
-            cam = state.get("active_cam", 0)
+            h_ok    = state["health_ok"]
+            h_sum   = state["health_summary"]
+            cam     = state.get("active_cam", 0)
             joy_age = (now - state["last_joy_ts"]) if state["last_joy_ts"] else 999.0
 
-        _put_text(frame, f"FPS: {fps:4.1f}", (10, 24))
-        _put_text(frame, f"Pressure: {p:.2f} bar", (10, 48))
-        _put_text(frame, f"Last vel req:  m1 {v1s:+.2f}  m2 {v2s:+.2f}", (10, 72))
-        _put_text(frame, f"LED: {'ON' if led_on else 'OFF'}   Joy age: {joy_age:.2f}s", (10, 96))
-        _put_text(frame, f"Cam: /dev/video{cam}   (X toggles cam)", (10, 120))
-
-        if h_ok is None:
-            _put_text(frame, "Radxa /health: (no data yet)", (10, 144))
-        elif h_ok:
-            _put_text(frame, f"Radxa /health: OK {h_sum}", (10, 144))
-        else:
-            _put_text(frame, f"Radxa /health: ERR {h_sum}", (10, 144))
-
-        _put_text(frame, "LB: LED ON  RB: LED OFF  A: BRAKE  X: CAM SW  (Q to quit video)", (10, 168))
-        _put_text(frame, f"JOY: {'OK' if joy_ok else 'WAITING'}", (10, 192))
-
-        cv2.imshow(win, frame)
+        cv2.imshow(win_vid, frame)
+        cv2.imshow(win_status, _make_status_frame(
+            fps, p, v1s, v2s, led_on, joy_ok, joy_age, cam, h_ok, h_sum
+        ))
         if (cv2.waitKey(1) & 0xFF) == ord("q"):
             break
 
