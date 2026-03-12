@@ -137,7 +137,9 @@ class StreamManager:
     def start(self):
         self.active = 0
         mounts = self.server.get_mount_points()
-        mounts.add_factory(self.args.rtsp_path, DualFactory(self))
+        factory = DualFactory(self)
+        factory.set_latency(0)
+        mounts.add_factory(self.args.rtsp_path, factory)
         print(f"[RTSP] rtsp://0.0.0.0:{self.args.rtsp_port}{self.args.rtsp_path}")
         print("[RTSP] Both cameras loaded; switch instantly with POST /cam/0 or /cam/10")
 
