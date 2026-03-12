@@ -41,15 +41,16 @@ def build_dual_pipeline(args) -> str:
             f"saturation={args.ll10_saturation} ! "
         )
 
-    # Shared normalize tail (used by both branches before selector)
+    # Shared normalize tail (used by both branches before selector).
+    # I420 intermediate forces software conversion before videoscale,
+    # avoiding "RGA Blit fail, invalid argument" on Rockchip.
     def normalize(fps_in=None):
-        src_fps_caps = f",framerate={fps_in}/1" if fps_in else ""
         return (
             f"queue max-size-buffers=2 leaky=downstream ! "
             f"videorate drop-only=true ! video/x-raw,framerate={out_fps}/1 ! "
-            f"videoconvert ! video/x-raw,format=NV12 ! "
-            f"videoscale ! "
-            f"video/x-raw,format=NV12,width={out_w},height={out_h},framerate={out_fps}/1 ! "
+            f"videoconvert ! video/x-raw,format=I420 ! "
+            f"videoscale ! video/x-raw,format=I420,width={out_w},height={out_h} ! "
+            f"videoconvert ! video/x-raw,format=NV12,width={out_w},height={out_h},framerate={out_fps}/1 ! "
             f"queue max-size-buffers=1 leaky=downstream ! "
         )
 
@@ -78,7 +79,7 @@ def build_dual_pipeline(args) -> str:
 
     cam10_branch = (
         cam10_src
-        + f"videoconvert ! {ll_boost}"
+        + f"videoconvert ! video/x-raw,format=I420 ! {ll_boost}"
         + normalize(args.fps10)
         + "sel.sink_1 "
     )
