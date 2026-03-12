@@ -41,16 +41,17 @@ def build_dual_pipeline(args) -> str:
             f"saturation={args.ll10_saturation} ! "
         )
 
-    # Shared normalize tail (used by both branches before selector).
-    # I420 intermediate forces software conversion before videoscale,
-    # avoiding "RGA Blit fail, invalid argument" on Rockchip.
+    # Normalize each branch to I420 at the output resolution before the selector.
+    # We stop at I420 (not NV12) so that the NV12 conversion happens AFTER
+    # the selector in the tail — this prevents "RGA Blit fail, invalid argument"
+    # on Rockchip, where input-selector output buffers confuse the RGA importer
+    # inside mpph264enc.
     def normalize(fps_in=None):
         return (
             f"queue max-size-buffers=2 leaky=downstream ! "
             f"videorate drop-only=true ! video/x-raw,framerate={out_fps}/1 ! "
             f"videoconvert ! video/x-raw,format=I420 ! "
             f"videoscale ! video/x-raw,format=I420,width={out_w},height={out_h} ! "
-            f"videoconvert ! video/x-raw,format=NV12,width={out_w},height={out_h},framerate={out_fps}/1 ! "
             f"queue max-size-buffers=1 leaky=downstream ! "
         )
 
@@ -85,8 +86,14 @@ def build_dual_pipeline(args) -> str:
     )
 
     # ---- Selector + shared encoder tail ----
+    # After the selector:
+    #   I420 -> BGRx  (pure software; I420->RGB is a well-known sw path)
+    #   BGRx -> NV12  (clean RGA path on Rockchip; avoids EINVAL)
+    #   NV12 -> mpph264enc
     tail = (
-        f"input-selector name=sel ! "
+        f"input-selector name=sel sync-streams=false ! "
+        f"videoconvert ! video/x-raw,format=BGRx,width={out_w},height={out_h} ! "
+        f"videoconvert ! video/x-raw,format=NV12,width={out_w},height={out_h} ! "
         f"queue max-size-buffers=1 leaky=downstream ! "
         f"{enc} bps=10000000 gop=5 ! "
         f"h264parse config-interval=-1 ! "
