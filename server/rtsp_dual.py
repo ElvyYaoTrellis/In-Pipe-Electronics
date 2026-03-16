@@ -13,13 +13,58 @@ from aiohttp import web
 Gst.init(None)
 
 
+def _enc_element(enc: str, bitrate: int = 10_000_000, gop: int = 5) -> str:
+    """Return the GStreamer encoder element string for the given encoder name.
+
+    v4l2h264enc  — Pi VideoCore IV HW encoder (uses extra-controls, not bps/gop)
+    x264enc      — software fallback (bitrate in kbps, different property names)
+    mpph264enc   — Rockchip MPP HW encoder (kept here for reference)
+    """
+    if enc == "v4l2h264enc":
+        return (
+            f"v4l2h264enc extra-controls=\"controls,"
+            f"video_bitrate={bitrate},"
+            f"h264_i_frame_period={gop}\" "
+            f"! video/x-h264,level=(string)4"
+        )
+    if enc == "x264enc":
+        return (
+            f"x264enc bitrate={bitrate // 1000} key-int-max={gop} "
+            f"tune=zerolatency speed-preset=ultrafast"
+        )
+    # mpph264enc (Rockchip) and anything else
+    return f"{enc} bps={bitrate} gop={gop}"
+
+
+def _cam_src(device: str, mode: str, width: int, height: int,
+             fps: int | None = None, extra_controls: str = "") -> str:
+    """Return the v4l2src + caps string for a camera branch (no trailing !)."""
+    fps_caps = f",framerate={fps}/1" if fps else ""
+    extra = f' extra-controls="{extra_controls}"' if extra_controls else ""
+    if mode == "mjpg":
+        return (
+            f"v4l2src device={device} io-mode=2 do-timestamp=true{extra} ! "
+            f"image/jpeg,width={width},height={height}{fps_caps} ! "
+            f"queue max-size-buffers=1 leaky=downstream ! "
+            f"jpegdec"
+        )
+    fmt = {"raw-uyvy": "UYVY", "raw-yuyv": "YUY2", "raw-yuy2": "YUY2"}.get(mode, "YUY2")
+    return (
+        f"v4l2src device={device} io-mode=2 do-timestamp=true{extra} ! "
+        f"video/x-raw,format={fmt},width={width},height={height}{fps_caps}"
+    )
+
+
 def build_dual_pipeline(args) -> str:
     """
     Build a single GStreamer pipeline with both cameras feeding an input-selector.
     Switching cameras = one property set on the selector element (name=sel).
 
-    Both branches are normalized to cam0's output resolution/fps before the selector
-    so caps are compatible. The shared encoder tail follows the selector.
+    Both branches are normalized to I420 at cam0 output resolution before the
+    selector. NV12 conversion + encoding happen after the selector.
+
+    On Raspberry Pi (v4l2h264enc) there is no RGA, so the direct I420->NV12
+    software path is used. No BGRx workaround needed.
 
     Switching:
         sel = pipeline.get_by_name("sel")
@@ -29,10 +74,7 @@ def build_dual_pipeline(args) -> str:
     out_w   = args.w0
     out_h   = args.h0
     out_fps = args.fps0
-    enc     = args.encoder
-    extra10 = f' extra-controls="{args.v4l2_extra10}"' if args.v4l2_extra10 else ""
 
-    # Low-light boost for cam10 (optional)
     ll_boost = ""
     if args.ll10:
         ll_boost = (
@@ -41,12 +83,8 @@ def build_dual_pipeline(args) -> str:
             f"saturation={args.ll10_saturation} ! "
         )
 
-    # Normalize each branch to I420 at the output resolution before the selector.
-    # We stop at I420 (not NV12) so that the NV12 conversion happens AFTER
-    # the selector in the tail — this prevents "RGA Blit fail, invalid argument"
-    # on Rockchip, where input-selector output buffers confuse the RGA importer
-    # inside mpph264enc.
-    def normalize(fps_in=None):
+    def normalize(src_fps=None):
+        """Scale + rate-match a branch to I420 at the output resolution."""
         return (
             f"queue max-size-buffers=2 leaky=downstream ! "
             f"videorate drop-only=true ! video/x-raw,framerate={out_fps}/1 ! "
@@ -56,46 +94,31 @@ def build_dual_pipeline(args) -> str:
         )
 
     # ---- Cam0 branch (sink_0) ----
+    cam0_mode = getattr(args, "cam0_mode", "raw-yuyv")
     cam0_branch = (
-        f"v4l2src device={args.dev0} io-mode=2 do-timestamp=true ! "
-        f"video/x-raw,format=UYVY,width={args.w0},height={args.h0} ! "
+        _cam_src(args.dev0, cam0_mode, args.w0, args.h0) + " ! "
         + normalize()
         + "sel.sink_0 "
     )
 
     # ---- Cam10 branch (sink_1) ----
     dev10_mode = args.dev10_mode if args.dev10_mode != "auto" else "mjpg"
-    if dev10_mode == "mjpg":
-        cam10_src = (
-            f"v4l2src device={args.dev10} io-mode=2 do-timestamp=true{extra10} ! "
-            f"image/jpeg,width={args.w10},height={args.h10},framerate={args.fps10}/1 ! "
-            f"queue max-size-buffers=1 leaky=downstream ! "
-            f"jpegdec ! "
-        )
-    else:
-        cam10_src = (
-            f"v4l2src device={args.dev10} io-mode=2 do-timestamp=true{extra10} ! "
-            f"video/x-raw,format=YUY2,width={args.w10},height={args.h10},framerate={args.fps10}/1 ! "
-        )
-
     cam10_branch = (
-        cam10_src
+        _cam_src(args.dev10, dev10_mode, args.w10, args.h10,
+                 fps=args.fps10, extra_controls=args.v4l2_extra10) + " ! "
         + f"videoconvert ! video/x-raw,format=I420 ! {ll_boost}"
         + normalize(args.fps10)
         + "sel.sink_1 "
     )
 
-    # ---- Selector + shared encoder tail ----
-    # After the selector:
-    #   I420 -> BGRx  (pure software; I420->RGB is a well-known sw path)
-    #   BGRx -> NV12  (clean RGA path on Rockchip; avoids EINVAL)
-    #   NV12 -> mpph264enc
+    # ---- Selector + encoder tail ----
+    # Direct I420 -> NV12 software path — no RGA workaround needed on Pi.
+    enc_str = _enc_element(args.encoder, bitrate=args.bitrate, gop=args.gop)
     tail = (
         f"input-selector name=sel sync-streams=false ! "
-        f"videoconvert ! video/x-raw,format=BGRx,width={out_w},height={out_h} ! "
         f"videoconvert ! video/x-raw,format=NV12,width={out_w},height={out_h} ! "
         f"queue max-size-buffers=1 leaky=downstream ! "
-        f"{enc} bps=10000000 gop=5 ! "
+        f"{enc_str} ! "
         f"h264parse config-interval=-1 ! "
         f"rtph264pay name=pay0 pt=96 config-interval=1"
     )
@@ -205,8 +228,13 @@ def main():
     ap.add_argument("--h10",   type=int, default=1080)
     ap.add_argument("--fps10", type=int, default=30)
 
+    ap.add_argument("--cam0_mode",  choices=["raw-uyvy", "raw-yuyv", "mjpg"], default="raw-yuyv",
+                    help="Cam0 capture format (default: raw-yuyv for Pi USB cameras)")
     ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="mjpg")
-    ap.add_argument("--encoder", default="mpph264enc")
+    ap.add_argument("--encoder", default="v4l2h264enc",
+                    help="GStreamer encoder element (v4l2h264enc, mpph264enc, x264enc)")
+    ap.add_argument("--bitrate", type=int, default=10_000_000, help="Encoder bitrate in bps")
+    ap.add_argument("--gop",     type=int, default=5,          help="Keyframe interval (frames)")
 
     # HTTP control
     ap.add_argument("--http_port", type=int, default=8081)
