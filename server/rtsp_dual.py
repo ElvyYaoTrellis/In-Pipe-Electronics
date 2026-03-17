@@ -111,9 +111,9 @@ def main():
     ap.add_argument("--rtsp_path", default="/stream")
     ap.add_argument("--dev0", default="/dev/video0")
 
-    ap.add_argument("--w0",   type=int, default=1280)
-    ap.add_argument("--h0",   type=int, default=720)
-    ap.add_argument("--fps0", type=int, default=20)
+    ap.add_argument("--w0",   type=int, default=1920)
+    ap.add_argument("--h0",   type=int, default=1080)
+    ap.add_argument("--fps0", type=int, default=30)
 
     ap.add_argument("--cam0_mode", choices=["csi", "raw-uyvy", "raw-yuyv", "mjpg"], default="csi",
                     help="Camera source mode: csi=Pi CSI camera (libcamerasrc), mjpg/raw-yuyv=USB camera")
