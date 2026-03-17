@@ -15,7 +15,6 @@ sudo apt-get install -y \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-ugly \
     gstreamer1.0-rtsp \
-    gstreamer1.0-v4l2 \
     gir1.2-gst-rtsp-server-1.0 \
     libgstrtspserver-1.0-dev
 
