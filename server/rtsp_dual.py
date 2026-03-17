@@ -25,8 +25,7 @@ def _enc_element(enc: str, bitrate: int = 10_000_000, gop: int = 5) -> str:
         return (
             f"v4l2h264enc extra-controls=\"controls,"
             f"video_bitrate={bitrate},"
-            f"h264_i_frame_period={gop}\" "
-            f"! video/x-h264,level=(string)4"
+            f"h264_i_frame_period={gop}\""
         )
     if enc == "x264enc":
         return (
@@ -157,7 +156,7 @@ def main():
                     help="Camera source mode: csi=Pi CSI camera (libcamerasrc), mjpg/raw-yuyv=USB camera")
     ap.add_argument("--encoder", default="v4l2h264enc",
                     help="GStreamer encoder (v4l2h264enc, mpph264enc, x264enc)")
-    ap.add_argument("--bitrate", type=int, default=10_000_000, help="Encoder bitrate in bps")
+    ap.add_argument("--bitrate", type=int, default=4_000_000, help="Encoder bitrate in bps")
     ap.add_argument("--gop",     type=int, default=5,          help="Keyframe interval (frames)")
 
     ap.add_argument("--http_port", type=int, default=8081)
