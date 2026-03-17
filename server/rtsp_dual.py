@@ -18,7 +18,7 @@ def _enc_element(enc: str, bitrate: int = 10_000_000, gop: int = 5) -> str:
 
     v4l2h264enc  — Pi VideoCore IV HW encoder (uses extra-controls, not bps/gop)
     x264enc      — software fallback (bitrate in kbps, different property names)
-    mpph264enc   — Rockchip MPP HW encoder (kept here for reference)
+    mpph264enc   — Rockchip MPP HW encoder
     """
     if enc == "v4l2h264enc":
         return (
@@ -32,13 +32,12 @@ def _enc_element(enc: str, bitrate: int = 10_000_000, gop: int = 5) -> str:
             f"x264enc bitrate={bitrate // 1000} key-int-max={gop} "
             f"tune=zerolatency speed-preset=ultrafast"
         )
-    # mpph264enc (Rockchip) and anything else
     return f"{enc} bps={bitrate} gop={gop}"
 
 
 def _cam_src(device: str, mode: str, width: int, height: int,
              fps: int | None = None, extra_controls: str = "") -> str:
-    """Return the v4l2src + caps string for a camera branch (no trailing !)."""
+    """Return the v4l2src + caps string (no trailing !)."""
     fps_caps = f",framerate={fps}/1" if fps else ""
     extra = f' extra-controls="{extra_controls}"' if extra_controls else ""
     if mode == "mjpg":
@@ -55,199 +54,69 @@ def _cam_src(device: str, mode: str, width: int, height: int,
     )
 
 
-def build_dual_pipeline(args) -> str:
-    """
-    Build a single GStreamer pipeline with both cameras feeding an input-selector.
-    Switching cameras = one property set on the selector element (name=sel).
-
-    Both branches are normalized to I420 at cam0 output resolution before the
-    selector. NV12 conversion + encoding happen after the selector.
-
-    On Raspberry Pi (v4l2h264enc) there is no RGA, so the direct I420->NV12
-    software path is used. No BGRx workaround needed.
-
-    Switching:
-        sel = pipeline.get_by_name("sel")
-        sel.set_property("active-pad", sel.get_static_pad("sink_0"))  # cam0
-        sel.set_property("active-pad", sel.get_static_pad("sink_1"))  # cam10
-    """
-    out_w   = args.w0
-    out_h   = args.h0
-    out_fps = args.fps0
-
-    ll_boost = ""
-    if args.ll10:
-        ll_boost = (
-            f"videobalance brightness={args.ll10_brightness} "
-            f"contrast={args.ll10_contrast} "
-            f"saturation={args.ll10_saturation} ! "
-        )
-
-    def normalize(src_fps=None):
-        """Scale + rate-match a branch to I420 at the output resolution."""
-        return (
-            f"queue max-size-buffers=2 leaky=downstream ! "
-            f"videorate drop-only=true ! video/x-raw,framerate={out_fps}/1 ! "
-            f"videoconvert ! video/x-raw,format=I420 ! "
-            f"videoscale ! video/x-raw,format=I420,width={out_w},height={out_h} ! "
-            f"queue max-size-buffers=1 leaky=downstream ! "
-        )
-
-    # ---- Cam0 branch (sink_0) ----
-    cam0_mode = getattr(args, "cam0_mode", "raw-yuyv")
-    cam0_branch = (
-        _cam_src(args.dev0, cam0_mode, args.w0, args.h0) + " ! "
-        + normalize()
-        + "sel.sink_0 "
-    )
-
-    # ---- Cam10 branch (sink_1) ----
-    dev10_mode = args.dev10_mode if args.dev10_mode != "auto" else "mjpg"
-    cam10_branch = (
-        _cam_src(args.dev10, dev10_mode, args.w10, args.h10,
-                 fps=args.fps10, extra_controls=args.v4l2_extra10) + " ! "
-        + f"videoconvert ! video/x-raw,format=I420 ! {ll_boost}"
-        + normalize(args.fps10)
-        + "sel.sink_1 "
-    )
-
-    # ---- Selector + encoder tail ----
-    # Direct I420 -> NV12 software path — no RGA workaround needed on Pi.
+def build_pipeline(args) -> str:
+    """Single-camera pipeline for /dev/video0."""
     enc_str = _enc_element(args.encoder, bitrate=args.bitrate, gop=args.gop)
-    tail = (
-        f"input-selector name=sel sync-streams=false ! "
-        f"videoconvert ! video/x-raw,format=NV12,width={out_w},height={out_h} ! "
+    cam0_mode = getattr(args, "cam0_mode", "raw-yuyv")
+    return (
+        _cam_src(args.dev0, cam0_mode, args.w0, args.h0, fps=args.fps0) + " ! "
+        f"queue max-size-buffers=2 leaky=downstream ! "
+        f"videorate drop-only=true ! video/x-raw,framerate={args.fps0}/1 ! "
+        f"videoconvert ! video/x-raw,format=I420 ! "
+        f"videoscale ! video/x-raw,format=I420,width={args.w0},height={args.h0} ! "
+        f"videoconvert ! video/x-raw,format=NV12,width={args.w0},height={args.h0} ! "
         f"queue max-size-buffers=1 leaky=downstream ! "
         f"{enc_str} ! "
         f"h264parse config-interval=-1 ! "
         f"rtph264pay name=pay0 pt=96 config-interval=1"
     )
 
-    return cam0_branch + cam10_branch + tail
 
-
-class DualFactory(GstRtspServer.RTSPMediaFactory):
-    """RTSP factory that builds the dual-camera pipeline and registers the selector."""
-
-    def __init__(self, mgr: "StreamManager"):
+class SingleFactory(GstRtspServer.RTSPMediaFactory):
+    def __init__(self, args):
         super().__init__()
-        self.mgr = mgr
+        self.args = args
         self.set_shared(True)
 
     def do_create_element(self, url):
-        pipeline_str = build_dual_pipeline(self.mgr.args)
+        pipeline_str = build_pipeline(self.args)
         print(f"[RTSP] Creating pipeline:\n  {pipeline_str}\n")
-        pipeline = Gst.parse_launch(pipeline_str)
-        sel = pipeline.get_by_name("sel")
-        self.mgr._register_selector(sel)
-        return pipeline
+        return Gst.parse_launch(pipeline_str)
 
 
-class StreamManager:
-    def __init__(self, args, server: GstRtspServer.RTSPServer):
-        self.args = args
-        self.server = server
-        self.active = 0
-        self._selector = None  # populated when first client connects
-
-    def _register_selector(self, sel):
-        self._selector = sel
-        # Apply any switch that happened before a client connected
-        pad_name = "sink_0" if self.active == 0 else "sink_1"
-        sel.set_property("active-pad", sel.get_static_pad(pad_name))
-        print(f"[RTSP] Selector ready, active pad: {pad_name}")
-
-    def start(self):
-        self.active = 0
-        mounts = self.server.get_mount_points()
-        factory = DualFactory(self)
-        factory.set_latency(0)
-        mounts.add_factory(self.args.rtsp_path, factory)
-        print(f"[RTSP] rtsp://0.0.0.0:{self.args.rtsp_port}{self.args.rtsp_path}")
-        print("[RTSP] Both cameras loaded; switch instantly with POST /cam/0 or /cam/10")
-
-    def switch_to(self, which: int):
-        def _do():
-            if which == self.active:
-                return False
-            self.active = which
-            if self._selector is None:
-                print(f"[SWITCH] Queued -> {'cam0' if which == 0 else 'cam10'} (no client yet)")
-                return False
-            pad_name = "sink_0" if which == 0 else "sink_1"
-            self._selector.set_property("active-pad", self._selector.get_static_pad(pad_name))
-            print(f"[SWITCH] -> {'cam0' if which == 0 else 'cam10'} (seamless, no reconnect)")
-            return False
-
-        GLib.idle_add(_do)
-
-
-def make_app(mgr: StreamManager):
+def make_app(args):
     app = web.Application()
 
     async def status(_):
         return web.json_response({
             "ok": True,
-            "active": mgr.active,
-            "device": mgr.args.dev0 if mgr.active == 0 else mgr.args.dev10,
-            "rtsp": f"rtsp://0.0.0.0:{mgr.args.rtsp_port}{mgr.args.rtsp_path}",
+            "device": args.dev0,
+            "rtsp": f"rtsp://0.0.0.0:{args.rtsp_port}{args.rtsp_path}",
         })
 
-    async def cam0(_):
-        mgr.switch_to(0)
-        return web.json_response({"ok": True, "switching_to": mgr.args.dev0})
-
-    async def cam10(_):
-        mgr.switch_to(10)
-        return web.json_response({"ok": True, "switching_to": mgr.args.dev10})
-
     app.router.add_get("/status", status)
-    app.router.add_post("/cam/0", cam0)
-    app.router.add_post("/cam/10", cam10)
     return app
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="RTSP server with seamless dual-camera switching via input-selector"
-    )
+    ap = argparse.ArgumentParser(description="Single-camera RTSP server for Raspberry Pi")
 
     ap.add_argument("--rtsp_port", default="8554")
     ap.add_argument("--rtsp_path", default="/stream")
+    ap.add_argument("--dev0", default="/dev/video0")
 
-    ap.add_argument("--dev0",  default="/dev/video0")
-    ap.add_argument("--dev10", default="/dev/video10")
-
-    # Cam0 — also sets the output resolution/fps for both cameras
     ap.add_argument("--w0",   type=int, default=1280)
     ap.add_argument("--h0",   type=int, default=720)
     ap.add_argument("--fps0", type=int, default=20)
 
-    # Cam10 (USB) — capture resolution; output is scaled to cam0 size
-    ap.add_argument("--w10",   type=int, default=1920)
-    ap.add_argument("--h10",   type=int, default=1080)
-    ap.add_argument("--fps10", type=int, default=30)
-
-    ap.add_argument("--cam0_mode",  choices=["raw-uyvy", "raw-yuyv", "mjpg"], default="raw-yuyv",
+    ap.add_argument("--cam0_mode", choices=["raw-uyvy", "raw-yuyv", "mjpg"], default="raw-yuyv",
                     help="Cam0 capture format (default: raw-yuyv for Pi USB cameras)")
-    ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="mjpg")
     ap.add_argument("--encoder", default="v4l2h264enc",
-                    help="GStreamer encoder element (v4l2h264enc, mpph264enc, x264enc)")
+                    help="GStreamer encoder (v4l2h264enc, mpph264enc, x264enc)")
     ap.add_argument("--bitrate", type=int, default=10_000_000, help="Encoder bitrate in bps")
     ap.add_argument("--gop",     type=int, default=5,          help="Keyframe interval (frames)")
 
-    # HTTP control
     ap.add_argument("--http_port", type=int, default=8081)
-
-    # Low-light for cam10
-    ap.add_argument("--ll10", dest="ll10", action="store_true")
-    ap.add_argument("--no_ll10", dest="ll10", action="store_false")
-    ap.set_defaults(ll10=False)
-    ap.add_argument("--ll10_brightness", type=float, default=0.55)
-    ap.add_argument("--ll10_contrast",   type=float, default=1.8)
-    ap.add_argument("--ll10_saturation", type=float, default=0.6)
-
-    ap.add_argument("--v4l2_extra10", default="")
 
     args = ap.parse_args()
 
@@ -255,19 +124,19 @@ def main():
     server.set_service(args.rtsp_port)
     server.attach(None)
 
-    loop = GLib.MainLoop()
-    mgr = StreamManager(args, server)
-    mgr.start()
+    factory = SingleFactory(args)
+    factory.set_latency(0)
+    server.get_mount_points().add_factory(args.rtsp_path, factory)
+    print(f"[RTSP] rtsp://0.0.0.0:{args.rtsp_port}{args.rtsp_path}")
 
+    loop = GLib.MainLoop()
     shutdown_event = threading.Event()
     shutting_down = False
 
     def _request_shutdown(signum, _frame):
         nonlocal shutting_down
         if shutting_down:
-            print(f"[SIGNAL] {signal.Signals(signum).name} again, forcing exit...")
             os._exit(130)
-            return
         shutting_down = True
         print(f"[SIGNAL] {signal.Signals(signum).name} received, shutting down...")
         shutdown_event.set()
@@ -280,7 +149,7 @@ def main():
         import asyncio
 
         async def _main():
-            app = make_app(mgr)
+            app = make_app(args)
             runner = web.AppRunner(app)
             await runner.setup()
             try:
@@ -301,16 +170,13 @@ def main():
 
     http_thread = threading.Thread(target=run_http, daemon=True)
     http_thread.start()
-
-    print(f"[HTTP] POST /cam/0 or /cam/10, GET /status  on port {args.http_port}")
+    print(f"[HTTP] GET /status on port {args.http_port}")
 
     try:
         loop.run()
     finally:
         shutdown_event.set()
         http_thread.join(timeout=3)
-        if http_thread.is_alive():
-            print("[HTTP] Shutdown timed out; letting OS reclaim socket.")
 
     return 0
 

@@ -24,7 +24,7 @@ sudo apt-get install -y \
     python3-smbus \
     i2c-tools
 
-pip3 install --break-system-packages \
+sudo pip3 install --break-system-packages \
     aiohttp \
     smbus2
 
