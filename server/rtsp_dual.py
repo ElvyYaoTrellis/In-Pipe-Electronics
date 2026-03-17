@@ -156,8 +156,8 @@ def main():
 
     ap.add_argument("--cam0_mode", choices=["csi", "raw-uyvy", "raw-yuyv", "mjpg"], default="csi",
                     help="Camera source mode: csi=Pi CSI camera (libcamerasrc), mjpg/raw-yuyv=USB camera")
-    ap.add_argument("--encoder", default="v4l2h264enc",
-                    help="GStreamer encoder (v4l2h264enc, mpph264enc, x264enc)")
+    ap.add_argument("--encoder", default="x264enc",
+                    help="GStreamer encoder (x264enc, v4l2h264enc, mpph264enc)")
     ap.add_argument("--bitrate", type=int, default=4_000_000, help="Encoder bitrate in bps")
     ap.add_argument("--gop",     type=int, default=5,          help="Keyframe interval (frames)")
 
