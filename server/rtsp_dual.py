@@ -65,12 +65,14 @@ def build_pipeline(args) -> str:
     cam0_mode = getattr(args, "cam0_mode", "raw-yuyv")
 
     if cam0_mode == "csi":
-        # Zero-copy CSI path: request NV12 directly from libcamerasrc so the
-        # Pi ISP outputs NV12 natively — no software videoconvert needed.
-        # libcamerasrc -> NV12 caps -> v4l2h264enc (HW) -> RTSP
+        # libcamerasrc outputs DMA-BUF NV12 buffers which v4l2h264enc cannot
+        # import directly (STREAMON fails with ESRCH). A single videoconvert
+        # creates a CPU-backed I420 copy that the encoder accepts.
+        # NV12->I420 is cheap (planar rearrangement only).
         return (
             f"libcamerasrc ! "
             f"video/x-raw,format=NV12,width={args.w0},height={args.h0},framerate={args.fps0}/1 ! "
+            f"videoconvert ! video/x-raw,format=I420 ! "
             f"queue max-size-buffers=1 leaky=downstream ! "
             f"{enc_str} ! "
             f"h264parse config-interval=-1 ! "
