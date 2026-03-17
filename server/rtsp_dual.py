@@ -66,13 +66,12 @@ def build_pipeline(args) -> str:
     cam0_mode = getattr(args, "cam0_mode", "raw-yuyv")
 
     if cam0_mode == "csi":
-        # CSI path: libcamerasrc already delivers the correct resolution.
-        # Let libcamera choose its native format, then do one videoconvert to
-        # NV12 — avoids double conversion that causes colour artifacts and lag.
+        # Zero-copy CSI path: request NV12 directly from libcamerasrc so the
+        # Pi ISP outputs NV12 natively — no software videoconvert needed.
+        # libcamerasrc -> NV12 caps -> v4l2h264enc (HW) -> RTSP
         return (
             f"libcamerasrc ! "
-            f"video/x-raw,width={args.w0},height={args.h0},framerate={args.fps0}/1 ! "
-            f"videoconvert ! video/x-raw,format=NV12 ! "
+            f"video/x-raw,format=NV12,width={args.w0},height={args.h0},framerate={args.fps0}/1 ! "
             f"queue max-size-buffers=1 leaky=downstream ! "
             f"{enc_str} ! "
             f"h264parse config-interval=-1 ! "
