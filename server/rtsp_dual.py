@@ -4,6 +4,7 @@ import gi
 import threading
 import signal
 import os
+import time
 
 gi.require_version("Gst", "1.0")
 gi.require_version("GstRtspServer", "1.0")
@@ -93,6 +94,27 @@ def build_pipeline(args) -> str:
     )
 
 
+def _attach_fps_probe(pipeline):
+    """Print encoder output FPS to terminal once per second."""
+    pay = pipeline.get_by_name("pay0")
+    if not pay:
+        return
+    pad = pay.get_static_pad("sink")
+    state = {"n": 0, "t": time.monotonic()}
+
+    def _probe(pad, info, *_):
+        state["n"] += 1
+        now = time.monotonic()
+        elapsed = now - state["t"]
+        if elapsed >= 1.0:
+            print(f"[FPS] {state['n'] / elapsed:.1f}", flush=True)
+            state["n"] = 0
+            state["t"] = now
+        return Gst.PadProbeReturn.OK
+
+    pad.add_probe(Gst.PadProbeType.BUFFER, _probe)
+
+
 class SingleFactory(GstRtspServer.RTSPMediaFactory):
     def __init__(self, args):
         super().__init__()
@@ -102,7 +124,9 @@ class SingleFactory(GstRtspServer.RTSPMediaFactory):
     def do_create_element(self, url):
         pipeline_str = build_pipeline(self.args)
         print(f"[RTSP] Creating pipeline:\n  {pipeline_str}\n")
-        return Gst.parse_launch(pipeline_str)
+        pipeline = Gst.parse_launch(pipeline_str)
+        _attach_fps_probe(pipeline)
+        return pipeline
 
 
 def make_app(args):
