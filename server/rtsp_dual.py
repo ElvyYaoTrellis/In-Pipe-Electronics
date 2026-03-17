@@ -61,9 +61,24 @@ def _cam_src(device: str, mode: str, width: int, height: int,
 
 
 def build_pipeline(args) -> str:
-    """Single-camera pipeline for /dev/video0."""
     enc_str = _enc_element(args.encoder, bitrate=args.bitrate, gop=args.gop)
     cam0_mode = getattr(args, "cam0_mode", "raw-yuyv")
+
+    if cam0_mode == "csi":
+        # CSI path: libcamerasrc already delivers the correct resolution.
+        # Let libcamera choose its native format, then do one videoconvert to
+        # NV12 — avoids double conversion that causes colour artifacts and lag.
+        return (
+            f"libcamerasrc ! "
+            f"video/x-raw,width={args.w0},height={args.h0},framerate={args.fps0}/1 ! "
+            f"videoconvert ! video/x-raw,format=NV12 ! "
+            f"queue max-size-buffers=1 leaky=downstream ! "
+            f"{enc_str} ! "
+            f"h264parse config-interval=-1 ! "
+            f"rtph264pay name=pay0 pt=96 config-interval=1"
+        )
+
+    # USB camera path
     return (
         _cam_src(args.dev0, cam0_mode, args.w0, args.h0, fps=args.fps0) + " ! "
         f"queue max-size-buffers=2 leaky=downstream ! "
