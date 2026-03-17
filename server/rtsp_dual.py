@@ -37,9 +37,15 @@ def _enc_element(enc: str, bitrate: int = 10_000_000, gop: int = 5) -> str:
 
 def _cam_src(device: str, mode: str, width: int, height: int,
              fps: int | None = None, extra_controls: str = "") -> str:
-    """Return the v4l2src + caps string (no trailing !)."""
+    """Return the source + caps string for a camera branch (no trailing !)."""
     fps_caps = f",framerate={fps}/1" if fps else ""
     extra = f' extra-controls="{extra_controls}"' if extra_controls else ""
+    if mode == "csi":
+        # Pi CSI camera via libcamera (unicam/libcamerasrc)
+        return (
+            f"libcamerasrc ! "
+            f"video/x-raw,format=NV12,width={width},height={height}{fps_caps}"
+        )
     if mode == "mjpg":
         return (
             f"v4l2src device={device} io-mode=2 do-timestamp=true{extra} ! "
@@ -109,8 +115,8 @@ def main():
     ap.add_argument("--h0",   type=int, default=720)
     ap.add_argument("--fps0", type=int, default=20)
 
-    ap.add_argument("--cam0_mode", choices=["raw-uyvy", "raw-yuyv", "mjpg"], default="raw-yuyv",
-                    help="Cam0 capture format (default: raw-yuyv for Pi USB cameras)")
+    ap.add_argument("--cam0_mode", choices=["csi", "raw-uyvy", "raw-yuyv", "mjpg"], default="csi",
+                    help="Camera source mode: csi=Pi CSI camera (libcamerasrc), mjpg/raw-yuyv=USB camera")
     ap.add_argument("--encoder", default="v4l2h264enc",
                     help="GStreamer encoder (v4l2h264enc, mpph264enc, x264enc)")
     ap.add_argument("--bitrate", type=int, default=10_000_000, help="Encoder bitrate in bps")
