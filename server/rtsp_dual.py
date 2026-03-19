@@ -57,7 +57,7 @@ def build_dual_pipeline(args) -> str:
 
     # ---- Cam0 branch (sink_0) ----
     cam0_branch = (
-        f"v4l2src device={args.dev0} io-mode=4 do-timestamp=true ! "
+        f"v4l2src device={args.dev0} io-mode=2 do-timestamp=true ! "
         f"video/x-raw,format=UYVY,width={args.w0},height={args.h0} ! "
         + normalize()
         + "sel.sink_0 "
