@@ -67,14 +67,14 @@ def build_dual_pipeline(args) -> str:
     dev10_mode = args.dev10_mode if args.dev10_mode != "auto" else "mjpg"
     if dev10_mode == "mjpg":
         cam10_src = (
-            f"v4l2src device={args.dev10} io-mode=2 do-timestamp=true{extra10} ! "
+            f"v4l2src device={args.dev10} io-mode=4 do-timestamp=true{extra10} ! "
             f"image/jpeg,width={args.w10},height={args.h10},framerate={args.fps10}/1 ! "
             f"queue max-size-buffers=1 leaky=downstream ! "
             f"jpegdec ! "
         )
     else:
         cam10_src = (
-            f"v4l2src device={args.dev10} io-mode=2 do-timestamp=true{extra10} ! "
+            f"v4l2src device={args.dev10} io-mode=4 do-timestamp=true{extra10} ! "
             f"video/x-raw,format=YUY2,width={args.w10},height={args.h10},framerate={args.fps10}/1 ! "
         )
 
