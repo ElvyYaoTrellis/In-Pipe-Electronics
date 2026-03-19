@@ -58,7 +58,7 @@ def build_dual_pipeline(args) -> str:
     # ---- Cam0 branch (sink_0) ----
     cam0_branch = (
         f"v4l2src device={args.dev0} io-mode=2 do-timestamp=true ! "
-        f"video/x-raw,format=UYVY,width={args.w0},height={args.h0} ! "
+        f"video/x-raw,format=NV12,width={args.w0},height={args.h0} ! "
         + normalize()
         + "sel.sink_0 "
     )
@@ -196,9 +196,9 @@ def main():
     ap.add_argument("--dev10", default="/dev/video10")
 
     # Cam0 — also sets the output resolution/fps for both cameras
-    ap.add_argument("--w0",   type=int, default=1280)
-    ap.add_argument("--h0",   type=int, default=720)
-    ap.add_argument("--fps0", type=int, default=20)
+    ap.add_argument("--w0",   type=int, default=1920)
+    ap.add_argument("--h0",   type=int, default=1080)
+    ap.add_argument("--fps0", type=int, default=21)
 
     # Cam10 (USB) — capture resolution; output is scaled to cam0 size
     ap.add_argument("--w10",   type=int, default=1920)
