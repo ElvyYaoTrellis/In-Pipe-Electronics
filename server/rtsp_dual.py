@@ -103,23 +103,6 @@ def build_dual_pipeline(args) -> str:
     return cam0_branch + cam10_branch + tail
 
 
-class DualFactory(GstRtspServer.RTSPMediaFactory):
-    """RTSP factory that builds the dual-camera pipeline and registers the selector."""
-
-    def __init__(self, mgr: "StreamManager"):
-        super().__init__()
-        self.mgr = mgr
-        self.set_shared(True)
-
-    def do_create_element(self, url):
-        pipeline_str = build_dual_pipeline(self.mgr.args)
-        print(f"[RTSP] Creating pipeline:\n  {pipeline_str}\n")
-        pipeline = Gst.parse_launch(pipeline_str)
-        sel = pipeline.get_by_name("sel")
-        self.mgr._register_selector(sel)
-        return pipeline
-
-
 class StreamManager:
     def __init__(self, args, server: GstRtspServer.RTSPServer):
         self.args = args
@@ -127,9 +110,13 @@ class StreamManager:
         self.active = 0
         self._selector = None  # populated when first client connects
 
-    def _register_selector(self, sel):
+    def _on_media_configure(self, factory, media):
+        pipeline = media.get_element()
+        sel = pipeline.get_by_name("sel")
+        if sel is None:
+            print("[RTSP] ERROR: input-selector 'sel' not found in pipeline!")
+            return
         self._selector = sel
-        # Apply any switch that happened before a client connected
         pad_name = "sink_0" if self.active == 0 else "sink_1"
         sel.set_property("active-pad", sel.get_static_pad(pad_name))
         print(f"[RTSP] Selector ready, active pad: {pad_name}")
@@ -137,8 +124,15 @@ class StreamManager:
     def start(self):
         self.active = 0
         mounts = self.server.get_mount_points()
-        factory = DualFactory(self)
+
+        pipeline_str = build_dual_pipeline(self.args)
+        print(f"[RTSP] Pipeline:\n  {pipeline_str}\n")
+
+        factory = GstRtspServer.RTSPMediaFactory()
+        factory.set_launch(f"( {pipeline_str} )")
+        factory.set_shared(True)
         factory.set_latency(0)
+        factory.connect("media-configure", self._on_media_configure)
         mounts.add_factory(self.args.rtsp_path, factory)
         print(f"[RTSP] rtsp://0.0.0.0:{self.args.rtsp_port}{self.args.rtsp_path}")
         print("[RTSP] Both cameras loaded; switch instantly with POST /cam/0 or /cam/10")
