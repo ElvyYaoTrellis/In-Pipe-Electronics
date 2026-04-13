@@ -95,7 +95,7 @@ def build_dual_pipeline(args) -> str:
         f"videoconvert ! video/x-raw,format=BGRx,width={out_w},height={out_h} ! "
         f"videoconvert ! video/x-raw,format=NV12,width={out_w},height={out_h} ! "
         f"queue max-size-buffers=1 leaky=downstream ! "
-        f"{enc} bps=10000000 gop=5 ! "
+        f"{enc} bps={args.bitrate} gop={args.gop} ! "
         f"h264parse config-interval=-1 ! "
         f"rtph264pay name=pay0 pt=96 config-interval=1"
     )
@@ -200,7 +200,9 @@ def main():
     ap.add_argument("--fps10", type=int, default=30)
 
     ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="mjpg")
-    ap.add_argument("--encoder", default="mpph264enc")
+    ap.add_argument("--encoder",  default="mpph264enc")
+    ap.add_argument("--bitrate",  type=int, default=10_000_000, help="Encoder bitrate in bps")
+    ap.add_argument("--gop",      type=int, default=5,          help="Keyframe interval (frames)")
 
     # HTTP control
     ap.add_argument("--http_port", type=int, default=8081)
