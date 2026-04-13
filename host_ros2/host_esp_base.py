@@ -274,18 +274,10 @@ def _open_rtsp():
         print("[video] opened via FFMPEG backend")
         return cap
 
-    # Option 2: GStreamer pipeline fallback (latency=0, no jitter buffer delay)
-    print("[video] FFMPEG backend failed, trying GStreamer pipeline...")
-    gst = (
-        f"rtspsrc location={RTSP_URL} latency=0 protocols=tcp ! "
-        "rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! "
-        "appsink drop=true sync=false max-buffers=1"
-    )
-    cap = cv2.VideoCapture(gst, cv2.CAP_GSTREAMER)
-    if cap.isOpened():
-        print("[video] opened via GStreamer backend")
-        return cap
-
+    # GStreamer backend is intentionally skipped: its C++ exception handling
+    # causes an abort ("terminate called without an active exception") when
+    # the RTSP server is unreachable, crashing the whole process.
+    print("[video] FFMPEG backend failed — server may not be ready yet")
     return None
 
 def _put_text(img, text, org, scale=0.6, color=(255, 255, 255), thickness=1):
@@ -559,6 +551,13 @@ def _make_status_frame(fps, p, v1s, v2s, led_on, joy_ok, joy_age, cam, h_ok, h_s
 
 
 def video_loop():
+    try:
+        _video_loop_inner()
+    except Exception as exc:
+        print(f"[video] crashed: {exc}")
+
+
+def _video_loop_inner():
     print(f"[video] Opening RTSP stream {RTSP_URL}")
     cap = _open_rtsp()
     if cap is None or not cap.isOpened():
