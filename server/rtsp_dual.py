@@ -74,7 +74,7 @@ def build_dual_pipeline(args) -> str:
         )
     else:
         cam10_src = (
-            f"v4l2src device={args.dev10} io-mode=4 do-timestamp=true{extra10} ! "
+            f"v4l2src device={args.dev10} io-mode=2 do-timestamp=true{extra10} ! "
             f"video/x-raw,format=YUY2,width={args.w10},height={args.h10},framerate={args.fps10}/1 ! "
         )
 
@@ -195,11 +195,11 @@ def main():
     ap.add_argument("--fps0", type=int, default=21)
 
     # Cam10 (USB) — capture resolution; output is scaled to cam0 size
-    ap.add_argument("--w10",   type=int, default=1920)
-    ap.add_argument("--h10",   type=int, default=1080)
-    ap.add_argument("--fps10", type=int, default=30)
+    ap.add_argument("--w10",   type=int, default=160)
+    ap.add_argument("--h10",   type=int, default=120)
+    ap.add_argument("--fps10", type=int, default=10)
 
-    ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="mjpg")
+    ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="yuy2")
     ap.add_argument("--encoder",  default="mpph264enc")
     ap.add_argument("--bitrate",  type=int, default=10_000_000, help="Encoder bitrate in bps")
     ap.add_argument("--gop",      type=int, default=5,          help="Keyframe interval (frames)")
