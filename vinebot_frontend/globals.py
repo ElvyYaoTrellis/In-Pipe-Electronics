@@ -1,11 +1,13 @@
 from threading import Lock
 
-axes_lock = Lock() 
-SERVO_URL = "http://192.168.1.55:80/servo"
-VIDEO_URL = "http://192.168.1.55:81/stream"
-TELEMETRY_URL = "http://192.168.1.55:82/telemetry"
-axes = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-image_label_global = None  # Global reference to the image label for joystick updates
-servo1_angle = 90
-servo2_angle = 90
-servo_lock = Lock()
+RADXA_IP  = "192.168.1.53"
+MOTOR_URL = f"http://{RADXA_IP}:8005"
+LED_URL   = f"http://{RADXA_IP}:8080"
+CAM_URL   = f"http://{RADXA_IP}:8081"
+VIDEO_URL = f"rtsp://{RADXA_IP}:8554/stream"
+
+# Scale joystick [-1, 1] to motor velocity units — tune to match your hardware
+MAX_VEL = 2000
+
+axes_lock = Lock()
+axes = [0.0] * 6
