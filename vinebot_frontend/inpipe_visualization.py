@@ -369,6 +369,9 @@ class MainWindow(QMainWindow):
         ).start()
 
         # ── Joystick (must poll on main thread on macOS) ──
+        # Prevent SDL from creating its own window/audio — we only need joystick
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
         pygame.init()
         pygame.joystick.init()
         self._joy_timer = QTimer()
