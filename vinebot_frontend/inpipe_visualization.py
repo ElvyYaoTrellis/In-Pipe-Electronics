@@ -22,7 +22,7 @@ from PySide6.QtGui import QImage, QPixmap, QSurfaceFormat, QColor
 from videolabel import VideoLabel
 from glstldisplay import GLSTLDisplay
 from matplotlib_3d_plot import Matplotlib3DPlot
-from globals import axes_lock, axes, MOTOR_URL, LED_URL, CAM_URL, VIDEO_URL, MAX_VEL
+from globals import axes_lock, axes, MOTOR_URL, LED_URL, LED_REAR_URL, CAM_URL, VIDEO_URL, MAX_VEL
 
 
 # ─────────────────────────────────────────────
@@ -140,6 +140,26 @@ class StatusPanel(QWidget):
         led_l.addLayout(led_btn_row)
         layout.addWidget(led_box)
 
+        # ── Rear LED ─────────────────────────────
+        rear_box, rear_l = _make_group("Rear LED")
+        self.rear_led_label = _label("—")
+        rear_l.addWidget(self.rear_led_label)
+        rear_btn_row = QHBoxLayout()
+        rear_on_btn  = QPushButton("ON")
+        rear_off_btn = QPushButton("OFF")
+        for btn in (rear_on_btn, rear_off_btn):
+            btn.setFixedHeight(22)
+            btn.setStyleSheet(
+                "QPushButton { background:#333; color:#ccc; border:1px solid #555; border-radius:3px; font-size:8pt; }"
+                "QPushButton:hover { background:#444; }"
+            )
+        rear_on_btn.clicked.connect(self._rear_led_on)
+        rear_off_btn.clicked.connect(self._rear_led_off)
+        rear_btn_row.addWidget(rear_on_btn)
+        rear_btn_row.addWidget(rear_off_btn)
+        rear_l.addLayout(rear_btn_row)
+        layout.addWidget(rear_box)
+
         # ── System ──────────────────────────────
         sys_box, sys_l = _make_group("System")
         self.battery_label = _label("Battery: —")
@@ -170,6 +190,22 @@ class StatusPanel(QWidget):
         ).start()
         self.led_label.setText("OFF")
         self.led_label.setStyleSheet("color: #dddddd; font-size: 9pt;")
+
+    def _rear_led_on(self):
+        threading.Thread(
+            target=lambda: requests.post(f"{LED_REAR_URL}/on", timeout=1),
+            daemon=True,
+        ).start()
+        self.rear_led_label.setText("ON  ●")
+        self.rear_led_label.setStyleSheet("color: #ffdd57; font-size: 9pt;")
+
+    def _rear_led_off(self):
+        threading.Thread(
+            target=lambda: requests.post(f"{LED_REAR_URL}/off", timeout=1),
+            daemon=True,
+        ).start()
+        self.rear_led_label.setText("OFF")
+        self.rear_led_label.setStyleSheet("color: #dddddd; font-size: 9pt;")
 
     # ── Camera switch ────────────────────────────
     def _switch_cam(self, idx):

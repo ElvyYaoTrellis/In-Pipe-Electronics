@@ -2,7 +2,8 @@ from threading import Lock
 
 RADXA_IP  = "192.168.1.53"
 MOTOR_URL = f"http://{RADXA_IP}:8005"
-LED_URL   = f"http://{RADXA_IP}:8080"
+LED_URL      = f"http://{RADXA_IP}:8080"
+LED_REAR_URL = f"http://{RADXA_IP}:8083"
 CAM_URL   = f"http://{RADXA_IP}:8081"
 VIDEO_URL = f"rtsp://{RADXA_IP}:8554/stream"
 
