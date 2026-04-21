@@ -1,6 +1,5 @@
 import sys
 import os
-import cv2
 import math
 import json
 import threading
@@ -8,6 +7,8 @@ import time
 
 os.environ["QT_API"] = "pyside6"
 
+import subprocess
+import numpy as np
 import pygame
 import requests
 
@@ -447,22 +448,38 @@ class MainWindow(QMainWindow):
 
     # ── Video (background thread + signal) ────────
     def _video_thread(self):
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        cap = cv2.VideoCapture(VIDEO_URL, cv2.CAP_FFMPEG)
-        if not cap.isOpened():
-            print(f"[video] Could not open {VIDEO_URL} — check RTSP server on Radxa")
+        W, H = 1280, 720
+        frame_bytes = W * H * 3
+
         while not self._stop.is_set():
-            ret, frame = cap.read()
-            if not ret:
-                cap.release()
-                time.sleep(2)
-                cap = cv2.VideoCapture(VIDEO_URL)
-                continue
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = frame.shape
-            qt_img = QImage(frame.data.tobytes(), w, h, ch * w, QImage.Format_RGB888)
-            self.frame_ready.emit(qt_img)
-        cap.release()
+            cmd = [
+                "ffmpeg", "-loglevel", "quiet",
+                "-rtsp_transport", "tcp",
+                "-i", VIDEO_URL,
+                "-f", "rawvideo", "-pix_fmt", "rgb24",
+                "-vf", f"scale={W}:{H}",
+                "pipe:1",
+            ]
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                print("[video] ffmpeg not found — install with: brew install ffmpeg")
+                return
+
+            print(f"[video] Connecting to {VIDEO_URL} ...")
+            while not self._stop.is_set():
+                raw = proc.stdout.read(frame_bytes)
+                if len(raw) != frame_bytes:
+                    break
+                frame = np.frombuffer(raw, dtype=np.uint8).reshape((H, W, 3))
+                qt_img = QImage(frame.data.tobytes(), W, H, W * 3, QImage.Format_RGB888)
+                self.frame_ready.emit(qt_img)
+
+            proc.kill()
+            proc.wait()
+            if not self._stop.is_set():
+                print("[video] Stream lost — reconnecting in 3s")
+                time.sleep(3)
 
     def _display_frame(self, qt_img: QImage):
         zoom = self.image_label.zoom_factor
@@ -573,8 +590,6 @@ class MainWindow(QMainWindow):
             self.menu_visible = True
 
     def _set_resolution(self, w, h):
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
         self._toggle_menu()
 
     def resizeEvent(self, event):
