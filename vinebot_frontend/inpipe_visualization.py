@@ -286,6 +286,7 @@ class MainWindow(QMainWindow):
     telemetry_updated = Signal(float, float, float, float)
     imu_label_updated = Signal(str)
     status_updated    = Signal(dict)
+    frame_ready       = Signal(QImage)
 
     def __init__(self):
         super().__init__()
@@ -348,16 +349,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         # ── Video ─────────────────────────────────
-        self.cap = cv2.VideoCapture(VIDEO_URL)
-        if not self.cap.isOpened():
-            print(f"[video] Could not open {VIDEO_URL} — check RTSP server on Radxa")
         self._frame_count = 0
         self._fps_t0 = time.monotonic()
         self._video_fps = 0.0
-
-        self.video_timer = QTimer()
-        self.video_timer.timeout.connect(self._update_frame)
-        self.video_timer.start(16)  # ~60 Hz
+        self.frame_ready.connect(self._display_frame)
 
         # ── IMU SSE stream ────────────────────────
         self._stop = threading.Event()
@@ -386,6 +381,9 @@ class MainWindow(QMainWindow):
             args=(self._stop, self._motor_cmd),
             daemon=True,
         ).start()
+
+        # Video capture runs in background thread to avoid blocking GUI
+        threading.Thread(target=self._video_thread, daemon=True).start()
 
         # ── Click-to-focus ────────────────────────
         self.image_label.clicked.connect(lambda: self._focus(self.image_label))
@@ -444,14 +442,25 @@ class MainWindow(QMainWindow):
         self._motor_cmd[0] = m1
         self._motor_cmd[1] = m2
 
-    # ── Video ─────────────────────────────────────
-    def _update_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
-            return
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = frame.shape
-        qt_img = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
+    # ── Video (background thread + signal) ────────
+    def _video_thread(self):
+        cap = cv2.VideoCapture(VIDEO_URL)
+        if not cap.isOpened():
+            print(f"[video] Could not open {VIDEO_URL} — check RTSP server on Radxa")
+        while not self._stop.is_set():
+            ret, frame = cap.read()
+            if not ret:
+                cap.release()
+                time.sleep(2)
+                cap = cv2.VideoCapture(VIDEO_URL)
+                continue
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = frame.shape
+            qt_img = QImage(frame.data.tobytes(), w, h, ch * w, QImage.Format_RGB888)
+            self.frame_ready.emit(qt_img)
+        cap.release()
+
+    def _display_frame(self, qt_img: QImage):
         zoom = self.image_label.zoom_factor
         pw = int(self.image_label.width() * zoom)
         ph = int(self.image_label.height() * zoom)
@@ -461,7 +470,6 @@ class MainWindow(QMainWindow):
         with axes_lock:
             self.image_label.overlay.update_axes(axes)
 
-        # FPS counter
         self._frame_count += 1
         now = time.monotonic()
         elapsed = now - self._fps_t0
@@ -575,7 +583,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self._stop.set()
-        self.cap.release()
         pygame.quit()
         super().closeEvent(event)
 
