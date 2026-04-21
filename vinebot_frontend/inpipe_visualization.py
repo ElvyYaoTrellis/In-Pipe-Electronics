@@ -447,7 +447,8 @@ class MainWindow(QMainWindow):
 
     # ── Video (background thread + signal) ────────
     def _video_thread(self):
-        cap = cv2.VideoCapture(VIDEO_URL)
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+        cap = cv2.VideoCapture(VIDEO_URL, cv2.CAP_FFMPEG)
         if not cap.isOpened():
             print(f"[video] Could not open {VIDEO_URL} — check RTSP server on Radxa")
         while not self._stop.is_set():
