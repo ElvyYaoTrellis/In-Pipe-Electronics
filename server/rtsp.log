@@ -1,0 +1,20 @@
+0:00:00.017163402 [35m 4504[00m     0x35d71e30 [31;01mERROR  [00m [00;01;36m  GST_PLUGIN_LOADING gstpluginloader.c:442:gst_plugin_loader_try_helper:[00m Spawning gst-plugin-scanner helper failed: Failed to execute child process “/usr/lib/aarch64-linux-gnu/gstreamer-1.0/gst-plugin-scanner” (No such file or directory)
+
+(python3:4504): GStreamer-WARNING **: 01:34:05.522: External plugin loader failed. This most likely means that the plugin loader helper binary was not found or could not be run. You might need to set the GST_PLUGIN_SCANNER environment variable if your setup is unusual. This should normally not be required though.
+/usr/lib/python3/dist-packages/gi/overrides/Gst.py:729: Warning: cannot register existing type 'GstRtpSrc'
+  return real_init(argv)
+/usr/lib/python3/dist-packages/gi/overrides/Gst.py:729: Warning: g_type_add_interface_static: assertion 'G_TYPE_IS_INSTANTIATABLE (instance_type)' failed
+  return real_init(argv)
+/usr/lib/python3/dist-packages/gi/overrides/Gst.py:729: Warning: g_once_init_leave: assertion 'result != 0' failed
+  return real_init(argv)
+
+(python3:4504): GStreamer-CRITICAL **: 01:34:08.268: gst_element_register: assertion 'g_type_is_a (type, GST_TYPE_ELEMENT)' failed
+/usr/lib/python3/dist-packages/gi/overrides/Gst.py:729: Warning: cannot register existing type 'GstRtpSink'
+  return real_init(argv)
+
+(python3:4504): GStreamer-CRITICAL **: 01:34:08.269: gst_element_register: assertion 'g_type_is_a (type, GST_TYPE_ELEMENT)' failed
+0:00:03.542837939 [35m 4504[00m     0x35d71e30 [31;01mERROR  [00m [00m           vadisplay gstvadisplay.c:287:gst_va_display_initialize:<vadisplaydrm0>[00m vaInitialize: unknown libva error
+
+(python3:4504): GStreamer-WARNING **: 01:34:09.166: Failed to load plugin '/usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgstgtk.so': /lib/aarch64-linux-gnu/libgdk-3.so.0: undefined symbol: cairo_xlib_surface_create_for_bitmap
+
+(python3:4504): GStreamer-WARNING **: 01:34:11.062: Failed to load plugin '/usr/lib/aarch64-linux-gnu/gstreamer-1.0/libcluttergst3.so': /lib/aarch64-linux-gnu/libgdk-3.so.0: undefined symbol: cairo_xlib_surface_create_for_bitmap
