@@ -242,56 +242,19 @@ class StatusPanel(QWidget):
 # Background threads
 # ─────────────────────────────────────────────
 
-def joystick_thread(stop_event, status_panel_ref):
-    pygame.init()
-    pygame.joystick.init()
-
-    joystick = None
-    last_cmd = 0.0
-    CMD_HZ = 20
-    CMD_INTERVAL = 1.0 / CMD_HZ
-
+def motor_cmd_thread(stop_event, cmd_ref):
+    """Sends motor commands from a background thread so HTTP doesn't block the GUI."""
     while not stop_event.is_set():
-        # (Re)initialize joystick
-        pygame.event.pump()
-        count = pygame.joystick.get_count()
-        if joystick is None and count > 0:
-            joystick = pygame.joystick.Joystick(0)
-            joystick.init()
-            status_panel_ref[0].update_joystick(True, joystick.get_name())
-        elif joystick is not None and count == 0:
-            joystick = None
-            status_panel_ref[0].update_joystick(False)
-
-        if joystick is None:
-            time.sleep(0.5)
-            continue
-
-        # Read axes
-        n = joystick.get_numaxes()
-        new_axes = [joystick.get_axis(i) for i in range(min(6, n))]
-        with axes_lock:
-            for i, v in enumerate(new_axes):
-                axes[i] = v
-
-        # Send motor commands at CMD_HZ
-        now = time.monotonic()
-        if now - last_cmd >= CMD_INTERVAL:
-            # Left stick Y (axis 1) → m1, Right stick Y (axis 4) → m2
-            # Negated: push stick forward = positive velocity
-            m1 = -new_axes[1] * MAX_VEL if len(new_axes) > 1 else 0.0
-            m2 = -new_axes[4] * MAX_VEL if len(new_axes) > 4 else 0.0
-            try:
-                requests.post(
-                    f"{MOTOR_URL}/motor",
-                    json={"m1": round(m1, 1), "m2": round(m2, 1), "timeout_s": 0.3},
-                    timeout=0.1,
-                )
-            except requests.RequestException:
-                pass
-            last_cmd = now
-
-        time.sleep(0.01)
+        m1, m2 = cmd_ref
+        try:
+            requests.post(
+                f"{MOTOR_URL}/motor",
+                json={"m1": round(m1, 1), "m2": round(m2, 1), "timeout_s": 0.3},
+                timeout=0.1,
+            )
+        except requests.RequestException:
+            pass
+        time.sleep(0.05)  # 20 Hz
 
 
 def status_poll_thread(stop_event, signal_emit):
@@ -347,7 +310,8 @@ class MainWindow(QMainWindow):
         self.localization_label.setFixedSize(320, 240)
 
         self.status_panel = StatusPanel()
-        self._status_panel_ref = [self.status_panel]  # mutable ref for thread
+        self._joystick = None
+        self._motor_cmd = [0.0, 0.0]  # [m1, m2] shared with motor_cmd_thread
 
         # ── Menu button ──────────────────────────
         self.menu_button = QPushButton("☰")
@@ -385,6 +349,8 @@ class MainWindow(QMainWindow):
 
         # ── Video ─────────────────────────────────
         self.cap = cv2.VideoCapture(VIDEO_URL)
+        if not self.cap.isOpened():
+            print(f"[video] Could not open {VIDEO_URL} — check RTSP server on Radxa")
         self._frame_count = 0
         self._fps_t0 = time.monotonic()
         self._video_fps = 0.0
@@ -407,10 +373,17 @@ class MainWindow(QMainWindow):
             daemon=True,
         ).start()
 
-        # ── Joystick ─────────────────────────────
+        # ── Joystick (must poll on main thread on macOS) ──
+        pygame.init()
+        pygame.joystick.init()
+        self._joy_timer = QTimer()
+        self._joy_timer.timeout.connect(self._poll_joystick)
+        self._joy_timer.start(50)  # 20 Hz
+
+        # Motor command sender runs in background so HTTP doesn't block GUI
         threading.Thread(
-            target=joystick_thread,
-            args=(self._stop, self._status_panel_ref),
+            target=motor_cmd_thread,
+            args=(self._stop, self._motor_cmd),
             daemon=True,
         ).start()
 
@@ -444,6 +417,32 @@ class MainWindow(QMainWindow):
         self._resize_timer = QTimer()
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(self._update_overlay_geo)
+
+    # ── Joystick (main thread) ────────────────────
+    def _poll_joystick(self):
+        pygame.event.pump()
+        count = pygame.joystick.get_count()
+        if self._joystick is None and count > 0:
+            self._joystick = pygame.joystick.Joystick(0)
+            self._joystick.init()
+            self.status_panel.update_joystick(True, self._joystick.get_name())
+        elif self._joystick is not None and count == 0:
+            self._joystick = None
+            self.status_panel.update_joystick(False)
+
+        if self._joystick is None:
+            return
+
+        n = self._joystick.get_numaxes()
+        new_axes = [self._joystick.get_axis(i) for i in range(min(6, n))]
+        with axes_lock:
+            for i, v in enumerate(new_axes):
+                axes[i] = v
+
+        m1 = -new_axes[1] * MAX_VEL if len(new_axes) > 1 else 0.0
+        m2 = -new_axes[4] * MAX_VEL if len(new_axes) > 4 else 0.0
+        self._motor_cmd[0] = m1
+        self._motor_cmd[1] = m2
 
     # ── Video ─────────────────────────────────────
     def _update_frame(self):
