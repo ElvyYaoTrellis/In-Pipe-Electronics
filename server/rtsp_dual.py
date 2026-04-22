@@ -49,7 +49,7 @@ def build_dual_pipeline(args) -> str:
     def normalize(fps_in=None):
         return (
             f"queue max-size-buffers=2 leaky=downstream ! "
-            f"videorate drop-only=true ! video/x-raw,framerate={out_fps}/1 ! "
+            f"videorate ! video/x-raw,framerate={out_fps}/1 ! "
             f"videoconvert ! video/x-raw,format=I420 ! "
             f"videoscale ! video/x-raw,format=I420,width={out_w},height={out_h} ! "
             f"queue max-size-buffers=1 leaky=downstream ! "
@@ -190,16 +190,16 @@ def main():
     ap.add_argument("--dev10", default="/dev/video10")
 
     # Cam0 — also sets the output resolution/fps for both cameras
-    ap.add_argument("--w0",   type=int, default=1920)
-    ap.add_argument("--h0",   type=int, default=1080)
+    ap.add_argument("--w0",   type=int, default=1280)
+    ap.add_argument("--h0",   type=int, default=720)
     ap.add_argument("--fps0", type=int, default=21)
 
     # Cam10 (USB) — capture resolution; output is scaled to cam0 size
-    ap.add_argument("--w10",   type=int, default=160)
-    ap.add_argument("--h10",   type=int, default=120)
-    ap.add_argument("--fps10", type=int, default=10)
+    ap.add_argument("--w10",   type=int, default=320)
+    ap.add_argument("--h10",   type=int, default=240)
+    ap.add_argument("--fps10", type=int, default=30)
 
-    ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="yuy2")
+    ap.add_argument("--dev10_mode", choices=["mjpg", "yuy2", "auto"], default="mjpg")
     ap.add_argument("--encoder",  default="mpph264enc")
     ap.add_argument("--bitrate",  type=int, default=10_000_000, help="Encoder bitrate in bps")
     ap.add_argument("--gop",      type=int, default=5,          help="Keyframe interval (frames)")
