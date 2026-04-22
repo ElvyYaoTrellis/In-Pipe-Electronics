@@ -1,31 +1,28 @@
 #!/usr/bin/env python3
 import asyncio
-import time
 import spidev
 from aiohttp import web
 
 # --- Hardware config ---
-N_LEDS = 12
-BUS, DEV = 3, 0        # /dev/spidev3.0  (SPI3 on Radxa Zero 3W)
-HZ      = 2_400_000    # 2.4 MHz → 417 ns/bit; 3 SPI bits ≈ WS2812 NZR timing
-#   logic 0 → 0b100  (T0H≈417 ns, T0L≈833 ns)
-#   logic 1 → 0b110  (T1H≈833 ns, T1L≈417 ns)
+N_RING = 12       # front ring LEDs (indices 0-11)
+N_LEDS = 13       # ring + 1 rear LED (index 12)
+BUS, DEV = 3, 0   # /dev/spidev3.0  (SPI3 on Radxa Zero 3W)
+HZ      = 2_400_000
 SYMBOL_0 = 0b100
 SYMBOL_1 = 0b110
-
-# Zero bytes needed for a ≥300 µs reset at 2.4 MHz (8 bits × 417 ns ≈ 3.3 µs/byte → ~91 bytes).
-# This is sent before AND after each frame so the strip always latches cleanly.
 _RESET_BYTES = bytes(91)
 
-# Open once at startup
 _spi = spidev.SpiDev()
 _spi.open(BUS, DEV)
 _spi.max_speed_hz = HZ
 _spi.mode = 0
 
+# Shared LED state (r, g, b, brightness)
+_ring = (0, 0, 0, 0.0)
+_rear = (0, 0, 0, 0.0)
+
 
 def _encode_grb(grb: bytes) -> bytearray:
-    """Convert raw GRB bytes to the SPI bitstream WS2812 needs."""
     out = bytearray()
     acc, acc_bits = 0, 0
     for byte in grb:
@@ -43,74 +40,109 @@ def _encode_grb(grb: bytes) -> bytearray:
     return out
 
 
-def _frame_all(r: int, g: int, b: int, brightness: float = 1.0) -> bytes:
+def _pixel(r, g, b, brightness):
     br = max(0.0, min(1.0, float(brightness)))
-    r = int((r & 255) * br)
-    g = int((g & 255) * br)
-    b = int((b & 255) * br)
-    return bytes([g, r, b]) * N_LEDS   # WS2812 wire order is GRB
+    return bytes([int(g * br), int(r * br), int(b * br)])  # GRB wire order
 
 
-def _write_ws2812(grb_frame: bytes, clear_twice: bool = False) -> None:
-    payload = _encode_grb(grb_frame)
+def _build_frame():
+    ring_px = _pixel(*_ring) * N_RING
+    rear_px = _pixel(*_rear)
+    return ring_px + rear_px
+
+
+def _write_ws2812(frame: bytes, clear_twice: bool = False) -> None:
+    payload = _encode_grb(frame)
     combined = _RESET_BYTES + payload + _RESET_BYTES
     _spi.writebytes2(combined)
     if clear_twice:
         _spi.writebytes2(_RESET_BYTES + payload + _RESET_BYTES)
-    # No close() — MOSI stays driven low by the controller
 
 
-async def _write_async(grb_frame: bytes, clear_twice: bool = False) -> None:
-    """Run the blocking SPI write in a thread so the event loop stays free."""
+async def _write_async(frame: bytes, clear_twice: bool = False) -> None:
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _write_ws2812, grb_frame, clear_twice)
+    await loop.run_in_executor(None, _write_ws2812, frame, clear_twice)
 
 
-
-async def _write_async(grb_frame: bytes, clear_twice: bool = False) -> None:
-    """Run the blocking SPI write in a thread so the event loop stays free."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _write_ws2812, grb_frame, clear_twice)
-
-
-# --- HTTP handlers ---
+# ── Ring endpoints ────────────────────────────────────────────────────────────
 
 async def led_on(_):
-    await _write_async(_frame_all(255, 255, 255, brightness=0.20))
-    print("led on (white)")
+    global _ring
+    _ring = (255, 255, 255, 0.20)
+    await _write_async(_build_frame())
     return web.json_response({"ok": True, "state": "on"})
 
 
 async def led_off(_):
-    await _write_async(_frame_all(0, 0, 0), clear_twice=True)
-    print("led off")
+    global _ring
+    _ring = (0, 0, 0, 0.0)
+    await _write_async(_build_frame(), clear_twice=True)
     return web.json_response({"ok": True, "state": "off"})
 
 
-# POST /set  {"r":255,"g":0,"b":0,"brightness":0.5}
 async def led_set(request):
+    global _ring
     data = await request.json()
-    r          = int(data.get("r", 0))
-    g          = int(data.get("g", 0))
-    b          = int(data.get("b", 0))
-    brightness = float(data.get("brightness", 1.0))
-    await _write_async(_frame_all(r, g, b, brightness=brightness))
-    return web.json_response({"ok": True, "state": "set",
-                               "r": r, "g": g, "b": b, "brightness": brightness})
+    r  = int(data.get("r", 0))
+    g  = int(data.get("g", 0))
+    b  = int(data.get("b", 0))
+    br = float(data.get("brightness", 1.0))
+    _ring = (r, g, b, br)
+    await _write_async(_build_frame())
+    return web.json_response({"ok": True, "r": r, "g": g, "b": b, "brightness": br})
+
+
+# ── Rear LED endpoints ────────────────────────────────────────────────────────
+
+async def rear_on(_):
+    global _rear
+    _rear = (255, 255, 255, 0.20)
+    await _write_async(_build_frame())
+    return web.json_response({"ok": True, "state": "on"})
+
+
+async def rear_off(_):
+    global _rear
+    _rear = (0, 0, 0, 0.0)
+    await _write_async(_build_frame(), clear_twice=True)
+    return web.json_response({"ok": True, "state": "off"})
+
+
+async def rear_set(request):
+    global _rear
+    data = await request.json()
+    r  = int(data.get("r", 0))
+    g  = int(data.get("g", 0))
+    b  = int(data.get("b", 0))
+    br = float(data.get("brightness", 1.0))
+    _rear = (r, g, b, br)
+    await _write_async(_build_frame())
+    return web.json_response({"ok": True, "r": r, "g": g, "b": b, "brightness": br})
+
+
+async def led_status(_):
+    return web.json_response({
+        "ok": True,
+        "ring": {"r": _ring[0], "g": _ring[1], "b": _ring[2], "brightness": _ring[3]},
+        "rear": {"r": _rear[0], "g": _rear[1], "b": _rear[2], "brightness": _rear[3]},
+    })
 
 
 async def on_shutdown(_app):
-    """Turn off all LEDs when the server stops."""
     try:
-        _write_ws2812(_frame_all(0, 0, 0), clear_twice=True)
+        _write_ws2812(_pixel(0, 0, 0, 0.0) * N_LEDS, clear_twice=True)
     except Exception:
         pass
 
 
 app = web.Application()
-app.router.add_post("/on",  led_on)
-app.router.add_post("/off", led_off)
-app.router.add_post("/set", led_set)
+app.router.add_post("/on",      led_on)
+app.router.add_post("/off",     led_off)
+app.router.add_post("/set",     led_set)
+app.router.add_post("/rear/on",  rear_on)
+app.router.add_post("/rear/off", rear_off)
+app.router.add_post("/rear/set", rear_set)
+app.router.add_get( "/status",  led_status)
 app.on_shutdown.append(on_shutdown)
 
 if __name__ == "__main__":
